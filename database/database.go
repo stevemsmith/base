@@ -36,11 +36,15 @@ func New(ctx context.Context, logger log.Logger, config DatabaseConfig) (*sql.DB
 		}
 		return db, nil
 	} else if config.Postgres != nil {
+		// Pool settings are applied to pgxpool inside postgresConnection.
+		// Do not call ApplyConnectionsConfig on the returned *sql.DB:
+		// OpenDBFromPool requires MaxIdleConns=0, and sql.DB setters do not
+		// configure the underlying pgxpool.
 		db, err := postgresConnection(ctx, logger, *config.Postgres, config.DatabaseName)
 		if err != nil {
 			return nil, fmt.Errorf("connecting to postgres: %w", err)
 		}
-		return ApplyPostgresConnectionsConfig(db, &config.Postgres.Connections, logger), nil
+		return db, nil
 	}
 
 	return nil, ErrMissingConfig
@@ -114,25 +118,15 @@ func ApplyConnectionsConfig(db *sql.DB, connections *ConnectionsConfig, logger l
 }
 
 // ApplyPostgresConnectionsConfig applies connection pool settings with safe defaults
-// for Postgres/AlloyDB. If any value in the provided config is zero, the corresponding
-// default from DefaultPostgresConnectionsConfig is used. This ensures all services get
-// failover-safe pool settings even if they don't explicitly configure them.
+// onto a *sql.DB.
+//
+// Deprecated: Postgres connections from New use pgxpool under the hood. Pool
+// settings are applied via ApplyPostgresPoolConfig inside postgresConnection.
+// Calling this on a Postgres *sql.DB from New is incorrect: SetMaxIdleConns
+// with a non-zero value breaks OpenDBFromPool, and the other setters do not
+// configure the underlying pgxpool. Prefer ConnectionsConfig on PostgresConfig
+// (applied automatically) or ApplyPostgresPoolConfig when building a pool.
 func ApplyPostgresConnectionsConfig(db *sql.DB, connections *ConnectionsConfig, logger log.Logger) *sql.DB {
-	defaults := DefaultPostgresConnectionsConfig()
-
-	applied := *connections
-	if applied.MaxOpen <= 0 {
-		applied.MaxOpen = defaults.MaxOpen
-	}
-	if applied.MaxIdle <= 0 {
-		applied.MaxIdle = defaults.MaxIdle
-	}
-	if applied.MaxLifetime <= 0 {
-		applied.MaxLifetime = defaults.MaxLifetime
-	}
-	if applied.MaxIdleTime <= 0 {
-		applied.MaxIdleTime = defaults.MaxIdleTime
-	}
-
+	applied := ResolvePostgresConnectionsConfig(*connections)
 	return ApplyConnectionsConfig(db, &applied, logger)
 }

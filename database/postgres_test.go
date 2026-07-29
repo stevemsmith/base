@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/moov-io/base"
 	"github.com/moov-io/base/database"
 	"github.com/moov-io/base/database/testdb"
@@ -320,4 +321,48 @@ func Test_Postgres_UniqueViolation(t *testing.T) {
 	_, err = db.Exec(insertQry, 1, "James")
 	require.Error(t, err)
 	require.True(t, database.UniqueViolation(err))
+}
+
+func TestApplyPostgresPoolConfig_Defaults(t *testing.T) {
+	poolConfig, err := pgxpool.ParseConfig("postgres://user:pass@localhost:5432/db")
+	require.NoError(t, err)
+
+	database.ApplyPostgresPoolConfig(log.NewTestLogger(), poolConfig, database.ConnectionsConfig{})
+
+	defaults := database.DefaultPostgresConnectionsConfig()
+	require.Equal(t, int32(defaults.MaxOpen), poolConfig.MaxConns)
+	require.Equal(t, int32(defaults.MaxIdle), poolConfig.MinIdleConns)
+	require.Equal(t, defaults.MaxLifetime, poolConfig.MaxConnLifetime)
+	require.Equal(t, defaults.MaxIdleTime, poolConfig.MaxConnIdleTime)
+}
+
+func TestApplyPostgresPoolConfig_Overrides(t *testing.T) {
+	poolConfig, err := pgxpool.ParseConfig("postgres://user:pass@localhost:5432/db")
+	require.NoError(t, err)
+
+	in := database.ConnectionsConfig{
+		MaxOpen:     10,
+		MaxIdle:     3,
+		MaxLifetime: time.Minute,
+		MaxIdleTime: 15 * time.Second,
+	}
+	database.ApplyPostgresPoolConfig(log.NewTestLogger(), poolConfig, in)
+
+	require.Equal(t, int32(10), poolConfig.MaxConns)
+	require.Equal(t, int32(3), poolConfig.MinIdleConns)
+	require.Equal(t, time.Minute, poolConfig.MaxConnLifetime)
+	require.Equal(t, 15*time.Second, poolConfig.MaxConnIdleTime)
+}
+
+func TestApplyPostgresPoolConfig_MaxIdleCappedByMaxOpen(t *testing.T) {
+	poolConfig, err := pgxpool.ParseConfig("postgres://user:pass@localhost:5432/db")
+	require.NoError(t, err)
+
+	database.ApplyPostgresPoolConfig(log.NewTestLogger(), poolConfig, database.ConnectionsConfig{
+		MaxOpen: 4,
+		MaxIdle: 10, // larger than MaxOpen
+	})
+
+	require.Equal(t, int32(4), poolConfig.MaxConns)
+	require.Equal(t, int32(4), poolConfig.MinIdleConns)
 }
