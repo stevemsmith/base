@@ -5,7 +5,6 @@ package database_test
 
 import (
 	"bytes"
-	"database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/moov-io/base/database"
-	"github.com/moov-io/base/log"
 
 	"github.com/stretchr/testify/require"
 )
@@ -124,40 +122,21 @@ func TestDataTooLong(t *testing.T) {
 	}
 }
 
-func TestApplyPostgresConnectionsConfig_Defaults(t *testing.T) {
-	// When no config values are set, defaults should be applied
-	db, err := sql.Open("txdb", "TestApplyPostgresConnectionsConfig_Defaults")
-	if err != nil {
-		t.Skip("skipping test without txdb driver")
-	}
-	defer db.Close()
-
-	connections := &database.ConnectionsConfig{}
-	database.ApplyPostgresConnectionsConfig(db, connections, log.NewTestLogger())
-
+func TestResolvePostgresConnectionsConfig_Defaults(t *testing.T) {
 	defaults := database.DefaultPostgresConnectionsConfig()
-	stats := db.Stats()
-	require.Equal(t, defaults.MaxOpen, stats.MaxOpenConnections)
+	got := database.ResolvePostgresConnectionsConfig(database.ConnectionsConfig{})
+	require.Equal(t, defaults, got)
 }
 
-func TestApplyPostgresConnectionsConfig_Overrides(t *testing.T) {
-	// When config values are set, they should override defaults
-	db, err := sql.Open("txdb", "TestApplyPostgresConnectionsConfig_Overrides")
-	if err != nil {
-		t.Skip("skipping test without txdb driver")
-	}
-	defer db.Close()
-
-	connections := &database.ConnectionsConfig{
+func TestResolvePostgresConnectionsConfig_Overrides(t *testing.T) {
+	in := database.ConnectionsConfig{
 		MaxOpen:     10,
 		MaxIdle:     3,
 		MaxLifetime: time.Minute,
 		MaxIdleTime: time.Second * 15,
 	}
-	database.ApplyPostgresConnectionsConfig(db, connections, log.NewTestLogger())
-
-	stats := db.Stats()
-	require.Equal(t, 10, stats.MaxOpenConnections)
+	got := database.ResolvePostgresConnectionsConfig(in)
+	require.Equal(t, in, got)
 }
 
 func TestDefaultPostgresConnectionsConfig(t *testing.T) {
